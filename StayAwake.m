@@ -39,6 +39,7 @@ static NSTimer *windowPollTimer;
 #if STAYAWAKE_DEBUG_LOG
 static const off_t LogSizeLimit = 200 * 1024;
 static NSUInteger snapshotsThisForeground;
+static NSUInteger lastSnapshotControllerCount;
 static NSTimeInterval lastSnapshotTime;
 
 static BOOL AppendLog(NSString *directory, NSData *line) {
@@ -149,7 +150,7 @@ static RuntimeMode IdentifyRuntime(NSString *processName, NSBundle *bundle, NSSt
         return RuntimeModeGuest;
     }
     NSBundle *hostBundle = ReadObject(NSUserDefaults.class, NSSelectorFromString(@"lcMainBundle"));
-    if ((hostBundle && [bundle.bundlePath isEqualToString:hostBundle.bundlePath]) ||
+    if (([hostBundle isKindOfClass:NSBundle.class] && [bundle.bundlePath isEqualToString:hostBundle.bundlePath]) ||
         [bundle.bundleIdentifier.lowercaseString hasPrefix:@"com.kdt.livecontainer"]) {
         return RuntimeModeHost;
     }
@@ -180,26 +181,34 @@ static NSString *SceneBundleID(UIViewController *controller) {
     return [identifier isKindOfClass:NSString.class] ? identifier : nil;
 }
 
+typedef struct {
+    BOOL sawFloatingWindow;
+    NSUInteger controllerCount;
+} HostWindowScan;
+
 // Via the documented UIViewController containment API. LiveContainer adds each
 // decorated virtual window directly as a child of the host root controller.
-static BOOL FindVisiblePiliPlus(UIViewController *controller, BOOL *sawFloatingWindow) {
+static BOOL FindVisiblePiliPlus(UIViewController *controller, HostWindowScan *scan) {
+    if (!controller) {
+        return NO;
+    }
+    scan->controllerCount++;
     if ([controller isKindOfClass:decoratedWindowClass]) {
-        *sawFloatingWindow = YES;
+        scan->sawFloatingWindow = YES;
         id scene = ReadObject(controller, NSSelectorFromString(@"appSceneVC"));
         return (MatchesPiliPlus(SceneBundleID(controller)) || MatchesPiliPlus(controller.title)) &&
                IsViewVisible(controller.viewIfLoaded) &&
                ReadBool(scene, NSSelectorFromString(@"isAppRunning"));
     }
     if ([controller isKindOfClass:appSceneClass]) {
-        *sawFloatingWindow = YES;
+        scan->sawFloatingWindow = YES;
     }
     for (UIViewController *child in controller.childViewControllers) {
-        if (FindVisiblePiliPlus(child, sawFloatingWindow)) {
+        if (FindVisiblePiliPlus(child, scan)) {
             return YES;
         }
     }
-    return controller.presentedViewController &&
-           FindVisiblePiliPlus(controller.presentedViewController, sawFloatingWindow);
+    return FindVisiblePiliPlus(controller.presentedViewController, scan);
 }
 
 #if STAYAWAKE_DEBUG_LOG
@@ -271,7 +280,7 @@ static void UpdateKeepAwake(UIApplication *application, BOOL desired, BOOL refre
 
 static void RefreshHostWindows(UIApplication *application, BOOL refresh, NSString *reason) {
     BOOL visible = NO;
-    BOOL sawFloatingWindow = NO;
+    HostWindowScan scan = {0};
     if (application.applicationState == UIApplicationStateActive) {
         for (UIScene *scene in application.connectedScenes) {
             if (![scene isKindOfClass:UIWindowScene.class] ||
@@ -279,7 +288,7 @@ static void RefreshHostWindows(UIApplication *application, BOOL refresh, NSStrin
                 continue;
             }
             for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-                if (FindVisiblePiliPlus(window.rootViewController, &sawFloatingWindow)) {
+                if (FindVisiblePiliPlus(window.rootViewController, &scan)) {
                     visible = YES;
                     break;
                 }
@@ -291,11 +300,13 @@ static void RefreshHostWindows(UIApplication *application, BOOL refresh, NSStrin
     }
     UpdateKeepAwake(application, visible, refresh, reason);
 #if STAYAWAKE_DEBUG_LOG
+    BOOL hasNewController = scan.controllerCount > lastSnapshotControllerCount;
     if (application.applicationState == UIApplicationStateActive &&
         (snapshotsThisForeground == 0 ||
-         (sawFloatingWindow && !visible && snapshotsThisForeground < 2 &&
+         ((scan.sawFloatingWindow || hasNewController) && !visible && snapshotsThisForeground < 2 &&
           NSProcessInfo.processInfo.systemUptime - lastSnapshotTime >= 8))) {
         Snapshot(application, snapshotsThisForeground == 0 ? @"foreground" : @"no-visible-match");
+        lastSnapshotControllerCount = scan.controllerCount;
     }
 #endif
 }
@@ -393,7 +404,8 @@ static void initStayAwake(void) {
         dispatch_async(dispatch_get_main_queue(), ^{
             NSBundle *bundle = NSBundle.mainBundle;
             NSString *processName = NSProcessInfo.processInfo.processName;
-            NSString *guestIdentifier = ReadObject(NSUserDefaults.class, NSSelectorFromString(@"lcGuestAppId"));
+            id candidate = ReadObject(NSUserDefaults.class, NSSelectorFromString(@"lcGuestAppId"));
+            NSString *guestIdentifier = [candidate isKindOfClass:NSString.class] ? candidate : nil;
             runtimeMode = IdentifyRuntime(processName, bundle, guestIdentifier);
             isPiliPlusGuest = MatchesPiliPlus(guestIdentifier) || MatchesPiliPlus(bundle.bundleIdentifier) ||
                              MatchesPiliPlus([bundle objectForInfoDictionaryKey:@"CFBundleDisplayName"]) ||

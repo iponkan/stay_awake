@@ -18,7 +18,7 @@ jobs:
           sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
           xcrun --sdk iphoneos clang \
             -arch arm64 -isysroot "$sdk_path" -miphoneos-version-min=15.0 \
-            -fobjc-arc -dynamiclib -framework UIKit -framework Foundation \
+            -fobjc-arc -dynamiclib -framework UIKit -framework Foundation -framework CoreGraphics \
             -install_name @rpath/StayAwake.dylib \
             StayAwake.m -o StayAwake.dylib
           file StayAwake.dylib
