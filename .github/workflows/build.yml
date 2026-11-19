@@ -1,0 +1,31 @@
+name: Build StayAwake.dylib
+
+on: [push, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build iOS arm64 dynamic library
+        run: |
+          sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -isysroot "$sdk_path" -miphoneos-version-min=15.0 \
+            -fobjc-arc -dynamiclib -framework UIKit -framework Foundation \
+            -install_name @rpath/StayAwake.dylib \
+            StayAwake.m -o StayAwake.dylib
+          file StayAwake.dylib
+          xcrun vtool -show-build StayAwake.dylib
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: StayAwake-iOS-arm64
+          path: StayAwake.dylib
+          if-no-files-found: error
