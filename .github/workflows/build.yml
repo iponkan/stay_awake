@@ -24,6 +24,12 @@ jobs:
           file StayAwake.dylib
           xcrun vtool -show-build StayAwake.dylib
 
+      - name: Ad-hoc sign and verify the dynamic library
+        run: |
+          codesign --force --sign - StayAwake.dylib
+          codesign --verify --strict --verbose=2 StayAwake.dylib
+          codesign --display --verbose=4 StayAwake.dylib
+
       - uses: actions/upload-artifact@v6
         with:
           name: StayAwake-iOS-arm64
@@ -48,4 +54,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" StayAwake.dylib \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "StayAwake $GITHUB_REF_NAME" \
-            --notes 'iOS 15.0+ arm64 dynamic library for LiveContainer.'
+            --notes 'Ad-hoc signed iOS 15.0+ arm64 dynamic library for LiveContainer. Remove the previously imported copy before importing this release.'
