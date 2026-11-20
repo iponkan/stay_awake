@@ -14,9 +14,16 @@
 #define STAYAWAKE_DEBUG_LOG 1
 #endif
 
-#define STAYAWAKE_TARGET_BUNDLE_ID @"com.example.piliplus"
-#define STAYAWAKE_TARGET_NAME @"piliplus"
-#define STAYAWAKE_TARGET_ALIAS @"pili"
+static NSString *const TargetBundleIDs[] = {
+    @"com.example.piliplus",
+    @"com.firecore.infuse",
+    @"com.google.ios.youtube",
+    @"com.alohabrowser.alohabrowser",
+};
+
+static NSString *const TargetNameTokens[] = {
+    @"pili", @"infuse", @"youtube", @"aloha", @"alohabrowser",
+};
 
 static const CGFloat MinimumWindowSide = 80;
 static const NSTimeInterval WindowPollInterval = 1.5;
@@ -31,7 +38,7 @@ typedef void (*IdleTimerSetter)(UIApplication *, SEL, BOOL);
 static IdleTimerSetter orig_setIdleTimerDisabled;
 static atomic_bool gShouldKeepAwake;
 static RuntimeMode runtimeMode;
-static BOOL isPiliPlusGuest;
+static BOOL isTargetGuest;
 static Class decoratedWindowClass;
 static Class appSceneClass;
 static NSTimer *windowPollTimer;
@@ -124,19 +131,30 @@ static BOOL ReadBool(id receiver, SEL selector) {
     return NO;
 }
 
-static BOOL MatchesPiliPlus(id value) {
+static BOOL MatchesTargetApp(id value) {
     if (![value isKindOfClass:NSString.class]) {
         return NO;
     }
     NSString *identifier = [value lowercaseString];
-    if ([identifier isEqualToString:STAYAWAKE_TARGET_BUNDLE_ID] ||
-        [identifier containsString:STAYAWAKE_TARGET_NAME]) {
+    for (NSUInteger i = 0; i < sizeof(TargetBundleIDs) / sizeof(TargetBundleIDs[0]); i++) {
+        NSString *bundleID = TargetBundleIDs[i];
+        if ([identifier isEqualToString:bundleID] ||
+            [identifier hasPrefix:[bundleID stringByAppendingString:@"."]]) {
+            return YES;
+        }
+    }
+    if ([identifier containsString:@"piliplus"]) {
         return YES;
     }
-    // Treat the short alias as a complete token to avoid matching unrelated apps.
+    // LiveContainer uses window titles and may report a re-signed bundle ID.
     NSArray *tokens = [identifier componentsSeparatedByCharactersInSet:
                        NSCharacterSet.alphanumericCharacterSet.invertedSet];
-    return [tokens containsObject:STAYAWAKE_TARGET_ALIAS];
+    for (NSUInteger i = 0; i < sizeof(TargetNameTokens) / sizeof(TargetNameTokens[0]); i++) {
+        if ([tokens containsObject:TargetNameTokens[i]]) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 static RuntimeMode IdentifyRuntime(NSString *processName, NSBundle *bundle, NSString *guestIdentifier) {
@@ -188,7 +206,7 @@ typedef struct {
 
 // Via the documented UIViewController containment API. LiveContainer adds each
 // decorated virtual window directly as a child of the host root controller.
-static BOOL FindVisiblePiliPlus(UIViewController *controller, HostWindowScan *scan) {
+static BOOL FindVisibleTargetWindow(UIViewController *controller, HostWindowScan *scan) {
     if (!controller) {
         return NO;
     }
@@ -196,7 +214,7 @@ static BOOL FindVisiblePiliPlus(UIViewController *controller, HostWindowScan *sc
     if ([controller isKindOfClass:decoratedWindowClass]) {
         scan->sawFloatingWindow = YES;
         id scene = ReadObject(controller, NSSelectorFromString(@"appSceneVC"));
-        return (MatchesPiliPlus(SceneBundleID(controller)) || MatchesPiliPlus(controller.title)) &&
+        return (MatchesTargetApp(SceneBundleID(controller)) || MatchesTargetApp(controller.title)) &&
                IsViewVisible(controller.viewIfLoaded) &&
                ReadBool(scene, NSSelectorFromString(@"isAppRunning"));
     }
@@ -204,11 +222,11 @@ static BOOL FindVisiblePiliPlus(UIViewController *controller, HostWindowScan *sc
         scan->sawFloatingWindow = YES;
     }
     for (UIViewController *child in controller.childViewControllers) {
-        if (FindVisiblePiliPlus(child, scan)) {
+        if (FindVisibleTargetWindow(child, scan)) {
             return YES;
         }
     }
-    return FindVisiblePiliPlus(controller.presentedViewController, scan);
+    return FindVisibleTargetWindow(controller.presentedViewController, scan);
 }
 
 #if STAYAWAKE_DEBUG_LOG
@@ -224,7 +242,7 @@ static void AppendControllerSnapshot(NSMutableString *snapshot, UIViewController
     [snapshot appendFormat:@"\n  VC depth=%lu %@ mounted=%d hidden=%d alpha=%.2f visible=%d frame=%@ id=%@ targetTitle=%d running=%d",
      (unsigned long)depth, NSStringFromClass(controller.class), view.window != nil,
      view.hidden, view.alpha, IsViewVisible(view), NSStringFromCGRect(view ? view.frame : CGRectZero),
-     identifier ?: @"-", [controller isKindOfClass:decoratedWindowClass] && MatchesPiliPlus(controller.title),
+     identifier ?: @"-", [controller isKindOfClass:decoratedWindowClass] && MatchesTargetApp(controller.title),
      [appScene isKindOfClass:appSceneClass] && ReadBool(appScene, NSSelectorFromString(@"isAppRunning"))];
     for (UIViewController *child in controller.childViewControllers) {
         AppendControllerSnapshot(snapshot, child, depth + 1, remaining);
@@ -288,7 +306,7 @@ static void RefreshHostWindows(UIApplication *application, BOOL refresh, NSStrin
                 continue;
             }
             for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-                if (FindVisiblePiliPlus(window.rootViewController, &scan)) {
+                if (FindVisibleTargetWindow(window.rootViewController, &scan)) {
                     visible = YES;
                     break;
                 }
@@ -390,7 +408,7 @@ static void Refresh(NSString *reason, BOOL forceRefresh) {
             windowPollTimer.tolerance = 0.2;
             [[NSRunLoop mainRunLoop] addTimer:windowPollTimer forMode:NSRunLoopCommonModes];
         }
-    } else if (isPiliPlusGuest && application.applicationState == UIApplicationStateActive) {
+    } else if (isTargetGuest && application.applicationState == UIApplicationStateActive) {
         UpdateKeepAwake(application, YES, forceRefresh, reason);
     }
 }
@@ -407,14 +425,14 @@ static void initStayAwake(void) {
             id candidate = ReadObject(NSUserDefaults.class, NSSelectorFromString(@"lcGuestAppId"));
             NSString *guestIdentifier = [candidate isKindOfClass:NSString.class] ? candidate : nil;
             runtimeMode = IdentifyRuntime(processName, bundle, guestIdentifier);
-            isPiliPlusGuest = MatchesPiliPlus(guestIdentifier) || MatchesPiliPlus(bundle.bundleIdentifier) ||
-                             MatchesPiliPlus([bundle objectForInfoDictionaryKey:@"CFBundleDisplayName"]) ||
-                             MatchesPiliPlus([bundle objectForInfoDictionaryKey:@"CFBundleName"]);
+            isTargetGuest = MatchesTargetApp(guestIdentifier) || MatchesTargetApp(bundle.bundleIdentifier) ||
+                            MatchesTargetApp([bundle objectForInfoDictionaryKey:@"CFBundleDisplayName"]) ||
+                            MatchesTargetApp([bundle objectForInfoDictionaryKey:@"CFBundleName"]);
             Log(@"constructor=%@ process=%@ bundle=%@ guest=%@ UIApplication(main)=%@ mode=%@",
                 loadedAt, processName, bundle.bundleIdentifier ?: @"-", guestIdentifier ?: @"-",
                 UIApplication.sharedApplication ? @"ready" : @"nil",
                 @[@"A/host", @"B/ordinary", @"C/LiveProcess"][runtimeMode]);
-            if (runtimeMode == RuntimeModeExtension || (runtimeMode == RuntimeModeGuest && !isPiliPlusGuest)) {
+            if (runtimeMode == RuntimeModeExtension || (runtimeMode == RuntimeModeGuest && !isTargetGuest)) {
                 return;
             }
 
