@@ -16,13 +16,14 @@
 
 static NSString *const TargetBundleIDs[] = {
     @"com.example.piliplus",
+    @"com.wzk112.bilibilinext.ios",
     @"com.firecore.infuse",
     @"com.google.ios.youtube",
     @"com.alohabrowser.alohabrowser",
 };
 
 static NSString *const TargetNameTokens[] = {
-    @"pili", @"infuse", @"youtube", @"aloha", @"alohabrowser",
+    @"pili", @"bilibilinext", @"infuse", @"youtube", @"aloha", @"alohabrowser",
 };
 
 static const CGFloat MinimumWindowSide = 80;
@@ -95,8 +96,15 @@ static void Log(NSString *format, ...) {
         NSLog(@"[StayAwake] Unable to write StayAwake_debug.log");
     }
 }
+
+static void LogApplicationEvent(NSString *event) {
+    UIApplication *application = UIApplication.sharedApplication;
+    Log(@"event %@ appState=%ld reportedIdleTimerDisabled=%d", event,
+        (long)application.applicationState, application.idleTimerDisabled);
+}
 #else
 #define Log(...) ((void)0)
+#define LogApplicationEvent(...) ((void)0)
 #endif
 
 static BOOL GetterHasType(id receiver, SEL selector, char type) {
@@ -450,7 +458,7 @@ static void initStayAwake(void) {
                                 usingBlock:^(NSNotification *note) {
                     BOOL becameActive = [note.name isEqualToString:UIApplicationDidBecomeActiveNotification] ||
                                         [note.name isEqualToString:UISceneDidActivateNotification];
-                    Log(@"event %@", note.name);
+                    LogApplicationEvent(note.name);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         Refresh(note.name, becameActive);
                     });
@@ -459,7 +467,11 @@ static void initStayAwake(void) {
 
             [center addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:NSOperationQueue.mainQueue
                             usingBlock:^(NSNotification *note) {
-                Log(@"event %@", note.name);
+                LogApplicationEvent(note.name);
+                // A guest can lose focus temporarily while its UI is still in the foreground.
+                if (runtimeMode != RuntimeModeHost) {
+                    return;
+                }
                 [windowPollTimer invalidate];
                 windowPollTimer = nil;
 #if STAYAWAKE_DEBUG_LOG
@@ -469,6 +481,25 @@ static void initStayAwake(void) {
                     UpdateKeepAwake(UIApplication.sharedApplication, NO, NO, note.name);
                 }
             }];
+
+            [center addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue
+                            usingBlock:^(NSNotification *note) {
+                LogApplicationEvent(note.name);
+                if (runtimeMode == RuntimeModeGuest && orig_setIdleTimerDisabled) {
+                    UpdateKeepAwake(UIApplication.sharedApplication, NO, NO, note.name);
+                }
+            }];
+
+#if STAYAWAKE_DEBUG_LOG
+            [center addObserverForName:UIScreenBrightnessDidChangeNotification object:nil queue:NSOperationQueue.mainQueue
+                            usingBlock:^(NSNotification *note) {
+                UIScreen *screen = note.object;
+                UIApplication *application = UIApplication.sharedApplication;
+                Log(@"brightness=%.3f appState=%ld reportedIdleTimerDisabled=%d keepAwake=%d",
+                    screen.brightness, (long)application.applicationState, application.idleTimerDisabled,
+                    (int)atomic_load(&gShouldKeepAwake));
+            }];
+#endif
 
             Refresh(@"initial main queue", YES);
             if (!UIApplication.sharedApplication) {

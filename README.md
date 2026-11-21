@@ -1,6 +1,6 @@
 # StayAwake
 
-适用于 LiveContainer 的防自动锁屏模块，支持 **PiliPlus、Infuse、YouTube 和 Aloha Browser**。构建目标为 iOS 15+ 真机 arm64。
+适用于 LiveContainer 的防自动锁屏模块，支持 **PiliPlus、Bilibili Next、Infuse、YouTube 和 Aloha Browser**。构建目标为 iOS 15+ 真机 arm64。
 
 普通启动时，受支持的 App 在前台保持常亮。使用 LiveContainer 多任务浮窗时，只要有一个受支持的浮窗可见且未最小化，就会保持常亮。最后一个目标浮窗关闭或最小化后恢复正常自动锁定。模块依据窗口是否可见判断，暂停播放或浏览页面时同样有效。
 
@@ -17,6 +17,7 @@
 - 把 iPhone 的自动锁定设为有限时长，打开一个受支持的 App 并等待超过该时长。多任务模式下，再最小化最后一个目标浮窗，确认自动锁定恢复。亮度变暗时可以观察是否真的进入锁屏。
 - 如果出现 `Failed to load tweaks`，回到「模块」页给插件重签。签名按钮不可用或重签报错时，在 LiveContainer 的「JIT-Less 模式诊断」检查证书。 [LiveContainer 模块指南](https://livecontainer.github.io/zh-CN/docs/guides/tweaks)
 - 在 iPhone「文件」→「我的 iPhone」→「LiveContainer」查看 `StayAwake_debug.log`。排查时提供这次重开后新出现的 `constructor=`、`snapshot`、`gShouldKeepAwake` 和 `orig idleTimerDisabled` 几行。多任务模式下应能看到宿主的 `mode=A/host`。
+- 如果 Infuse 黑屏，请注明是否进入了 iOS 锁屏，以及播放声音是否还在。附上黑屏前后的 `brightness=`、`reportedIdleTimerDisabled=` 和 `UIApplicationDidEnterBackgroundNotification` 记录。
 
 ## 构建
 
