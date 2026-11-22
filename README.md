@@ -9,7 +9,7 @@
 1. 从 [GitHub Releases](https://github.com/iponkan/stay_awake/releases/latest) 下载 `StayAwake.dylib`。
 2. 在 LiveContainer 的「模块」页移除旧版 StayAwake，再把新版导入**全局模块根目录**并启用。
 3. 点「模块」页右上角 **「＋」左边的手写签名图标**，让 LiveContainer 用设备上的侧载证书给模块重签。
-4. 如果使用多任务浮窗，在 LiveContainer「设置」滑到底部，连续点版本号五次，在开发者设置里开启 **「向 LiveContainer 加载模块」**。
+4. **开启「向 LiveContainer 加载模块」**。打开 LiveContainer 的「设置」，滑到最底部，连续点版本号 **五次**，进入出现的开发者设置，打开 **「向 LiveContainer 加载模块」**（Load Tweaks to LiveContainer Itself）。这个开关默认关闭，宿主首页和多任务浮窗依赖它。即使 StayAwake 已在「模块」页启用，也要在所用的 LiveContainer 实例中开启这个开关。
 5. **从 iPhone 的 App 切换器划掉 LiveContainer 本身，再重新打开。** 每次替换 dylib 都需要重签并重启宿主。只关浮窗会继续使用宿主已加载的旧版本。
 
 ## 验证与排查
